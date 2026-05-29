@@ -1,5 +1,7 @@
 # Degree Project
 
+Dataset & Weights Link: https://drive.google.com/drive/folders/1bOcunyfTTiFi0Ke2uvxr8xR0gOKhjEQj?usp=drive_link
+
 ## Basic Components
 
 - **Dataset**: `underwater_bs.zip/underwater_bs_deblur.zip`
