@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Underwater Small Object Detection Demo System</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1e1e2e; color: #eee; margin: 0; display: flex; height: 100vh; }
+        .video-panel { flex: 3; padding: 20px; }
+        .side-panel { flex: 1; background: #2a2a3c; padding: 15px; overflow-y: auto; }
+        img { max-width: 100%; border: 2px solid #444; border-radius: 8px; }
+        .controls button { padding: 8px 16px; margin: 5px; font-size: 16px; cursor: pointer; }
+        .stats-box { background: #333; border-radius: 5px; padding: 10px; margin: 10px 0; }
+        .alarm-item { background: #ff4d4d; margin: 5px 0; padding: 5px; border-radius: 3px; font-size: 14px; }
+        .alarm-settings { background: #333; border-radius: 5px; padding: 10px; margin: 10px 0; }
+        .alarm-settings h4 { margin-top: 0; margin-bottom: 10px; color: #ffaa00; }
+        .checkbox-group { max-height: 200px; overflow-y: auto; margin: 5px 0; }
+        .checkbox-group label { display: block; margin: 2px 0; font-size: 14px; cursor: pointer; }
+        .checkbox-group input { margin-right: 5px; }
+        .density-input { width: 60px; padding: 2px 5px; margin-left: 5px; }
+        .apply-btn { padding: 5px 12px; margin-top: 8px; background: #ffaa00; border: none; color: #1e1e2e; font-weight: bold; border-radius: 3px; cursor: pointer; }
+        .apply-btn:hover { background: #ffbb22; }
+    </style>
+</head>
+<body>
+<div class="container" style="display: flex; width: 100%;">
+    <div class="video-panel">
+        <h2>Live Detection View</h2>
+        <img id="videoStream" src="/video_feed" alt="Video Stream">
+        <div class="controls">
+            <button onclick="pause()">Pause</button>
+            <button onclick="resume()">Resume</button>
+        </div>
+        <div class="stats-box" id="liveStats">Waiting for video stream...</div>
+    </div>
+    <div class="side-panel">
+        <h3> Detection Statistics</h3>
+        <canvas id="countChart" width="300" height="200"></canvas>
+        
+        <!-- 新增报警配置区域 -->
+        <div class="alarm-settings">
+            <h4> Alarm Settings</h4>
+            <div>
+                <label>Density Threshold: 
+                    <input type="number" id="densityThreshold" class="density-input" value="20" min="0" step="1">
+                </label>
+            </div>
+            <div style="margin-top: 8px;">
+                <span>Select Classes to Alarm:</span>
+                <div class="checkbox-group" id="classCheckboxes">
+                    <!-- 由后端模板动态生成复选框 -->
+                    {% for name in class_names %}
+                    <label>
+                        <input type="checkbox" value="{{ name }}"> {{ name }}
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            <button class="apply-btn" onclick="applyAlarmSettings()">Apply Settings</button>
+        </div>
+        
+        <h3> Alarm List</h3>
+        <div id="alarmContainer"></div>
+        <h3> System Resources</h3>
+        <div id="sysInfo"></div>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    let countChart;
+    const ctx = document.getElementById('countChart').getContext('2d');
+    countChart = new Chart(ctx, { type: 'bar', data: { labels: [], datasets: [{ label: 'Cumulative Detections', data: [], backgroundColor: 'rgba(75, 192, 192, 0.6)' }] }, options: { responsive: true, scales: { y: { beginAtZero: true } } } });
+
+    function updateChart(objectCounts) {
+        const labels = Object.keys(objectCounts || {});
+        const data = Object.values(objectCounts || {});
+        countChart.data.labels = labels;
+        countChart.data.datasets[0].data = data;
+        countChart.update();
+    }
+
+    socket.on('connect', () => { document.getElementById('liveStats').textContent = 'Connected, loading video...'; });
+    socket.on('stats_update', (stats) => {
+        document.getElementById('liveStats').innerHTML = `Frames: ${stats.frame_count} | Current targets: ${stats.track_count}`;
+        if (stats.object_counts) updateChart(stats.object_counts);
+        const container = document.getElementById('alarmContainer');
+        container.innerHTML = '';
+        (stats.alarms || []).forEach(al => {
+            const div = document.createElement('div');
+            div.className = 'alarm-item';
+            div.textContent = `[${al.time}] ${al.message}`;
+            container.appendChild(div);
+        });
+    });
+
+    async function fetchSysInfo() {
+        const res = await fetch('/system_info'); const data = await res.json();
+        document.getElementById('sysInfo').innerHTML = `CPU: ${data.cpu}% | Memory: ${data.memory}%`;
+    }
+    setInterval(fetchSysInfo, 2000);
+
+    function pause() { fetch('/stop'); }
+    function resume() { fetch('/start'); }
+
+    // 新增：应用报警配置
+    async function applyAlarmSettings() {
+        const density = parseInt(document.getElementById('densityThreshold').value) || 20;
+        const checkboxes = document.querySelectorAll('#classCheckboxes input[type="checkbox"]:checked');
+        const selectedClasses = Array.from(checkboxes).map(cb => cb.value);
+        
+        try {
+            const response = await fetch('/update_alarm_config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    density_threshold: density,
+                    selected_classes: selectedClasses
+                })
+            });
+            const result = await response.json();
+            if (result.status === 'ok') {
+                alert(`Alarm settings updated:\nDensity Threshold: ${result.density_threshold}\nClasses: ${result.selected_classes.join(', ') || 'None'}`);
+            } else {
+                alert('Error updating alarm settings: ' + result.message);
+            }
+        } catch (error) {
+            console.error('Failed to apply settings:', error);
+            alert('Failed to apply alarm settings.');
+        }
+    }
+</script>
+</body>
+</html>

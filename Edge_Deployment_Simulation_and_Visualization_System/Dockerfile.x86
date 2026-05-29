@@ -1,0 +1,26 @@
+FROM ubuntu:20.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    libgl1-mesa-glx libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir \
+    onnxruntime \
+    opencv-python-headless \
+    numpy \
+    psutil \
+    matplotlib \
+    pandas
+
+#COPY end2end_distill.onnx /app/end2end_distill.onnx
+COPY end2end_light.onnx /app/end2end_light.onnx
+COPY src/eval_edge.py /app/eval_edge.py
+COPY test_images/ /app/test_images/  
+
+WORKDIR /app
+RUN mkdir -p /app/results && chmod 777 /app/results
+
+CMD ["python3", "eval_edge.py", "--model", "end2end_light.onnx", "--runs", "50"]
